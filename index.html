@@ -215,6 +215,9 @@ function futureMonths(){ // desde el mes actual hasta mar-2027
   while(!(y===2027&&mo>=3)){mo++;if(mo>12){mo=1;y++;}out.push(`${y}-${String(mo).padStart(2,'0')}`);if(y>2027)break;}
   return out;
 }
+function cashFlowMonths(){
+  return futureMonths().filter(m=>m<='2026-12');
+}
 function selectableMonths(){
   return [...new Set(DATA.months.concat(futureMonths()))];
 }
@@ -500,7 +503,7 @@ const render={};
 render.home=()=>{
   const P=projection(); const top=clients().sort((a,b)=>sumInc(b,lastN(12))-sumInc(a,lastN(12)));
   const cards=[
-    ['flujo','📈','Flujo de Caja','Real y proyectado a marzo',MM(P.cajaFin),'Caja proyectada mar'],
+    ['flujo','📈','Flujo de Caja','Real y proyectado a diciembre',MM(P.cajaFin),'Caja proyectada dic'],
     ['clientes','🗂️','Clientes','Cobrado, proyectado y margen',clients().length+' activos','Cartera'],
     ['socios','👥','Socios','Aporte, retiros y saldos','RCM '+PCT(0.707),'Mayor aporte'],
     ['control','🧭','Control de Gestión','Indicadores y alertas',MM(P.incMonthly),'Ingreso op./mes'],
@@ -509,7 +512,7 @@ render.home=()=>{
 };
 
 function projection(){
-  const fut=futureMonths(), eg=projExpenseMonthly();
+  const fut=cashFlowMonths(), eg=projExpenseMonthly();
   const selected=selectedMonth();
   const selectedInc=clients().reduce((a,c)=>a+projectedClientIncome(c,selected),0);
   const recM=clients().filter(isRec).reduce((a,c)=>a+projectedClientIncome(c,selected),0);
@@ -531,7 +534,7 @@ render.flujo=()=>{
   const byc=clients().map(c=>{const amount=periodClientAmount(c,ms);return{c,rec:isRec(c),real:amount,mensual:ms.length?amount/ms.length:0,proj:projMonthlyClient(c)};}).filter(x=>state.view==='mes'?x.real>0:(x.real>0||x.proj>0)).sort((a,b)=>b.real-a.real);
   const monthTable=state.view==='mes';
   document.getElementById('s-flujo').innerHTML=`
-    <div class="mhead"><div><h2>Flujo de Caja</h2><div class="sub">Real hasta abril 2026 y proyección operacional hasta marzo 2027. La proyección no incluye retiros de socios.</div></div>
+    <div class="mhead"><div><h2>Flujo de Caja</h2><div class="sub">Real hasta abril 2026 y proyección operacional hasta diciembre 2026. La proyección no incluye retiros de socios.</div></div>
       <div class="seg" id="seg-view">${['mes','semestre','año'].map((v,i)=>`<button class="${(state.view===v||(v==='año'&&state.view==='año'))?'on':''}" data-v="${v==='año'?'año':v}">${v[0].toUpperCase()+v.slice(1)}</button>`).join('')}</div>
     </div>
     ${state.view==='mes'?`<div class="tools">${monthSelectHtml('flujo-month')}</div>`:''}
@@ -539,9 +542,9 @@ render.flujo=()=>{
       <div class="kpi b"><div class="k">Ingreso proyectado/mes</div><div class="v num">${MM(P.incMonthly)}</div><div class="m">rec ${MM(P.recM)} · esp ${MM(P.spoM)}</div></div>
       <div class="kpi r"><div class="k">Egreso proyectado/mes</div><div class="v num">${MM(P.expMonthly)}</div></div>
       <div class="kpi ${P.net>=0?'g':'r'}"><div class="k">Flujo proyectado/mes</div><div class="v num">${MM(P.net)}</div></div>
-      <div class="kpi ${P.cajaFin<0?'r':'b'}"><div class="k">Caja proyectada mar</div><div class="v num">${MM(P.cajaFin)}</div></div>
+      <div class="kpi ${P.cajaFin<0?'r':'b'}"><div class="k">Caja proyectada dic</div><div class="v num">${MM(P.cajaFin)}</div></div>
     </div>
-	    <div class="panel"><h3>Ingresos y egresos · real + proyectado<span class="tag">${state.view} · hasta mar-2027</span></h3>${flowChart(real,proj)}
+	    <div class="panel"><h3>Ingresos y egresos · real + proyectado<span class="tag">${state.view} · hasta dic-2026</span></h3>${flowChart(real,proj)}
 	      <div class="legend"><span><i class="dot" style="background:var(--accent)"></i>Ingreso</span><span><i class="dot" style="background:var(--neg)"></i>Egreso</span><span style="color:var(--warn)">▏ línea = inicio de proyección · barras tenues = proyección</span></div></div>
 	    <div class="panel"><h3>Ingresos por cliente<span class="tag">${realPeriodLabel()} · real vs proyección mensual</span></h3>
 	      <div class="legend" style="margin:0 0 10px"><span><i class="dot rec"></i>Recurrente</span><span><i class="dot spo"></i>Esporádico</span></div>
@@ -678,7 +681,7 @@ render.control=()=>{
     <div class="mhead"><div><h2>Control de Gestión</h2><div class="sub">Síntesis visual de lo que más importa.</div></div></div>
     <div class="tools">${monthSelectHtml('control-month')}</div>
     <div class="kpis">
-      <div class="kpi ${P.cajaFin<0?'r':'b'}"><div class="k">Caja proyectada mar</div><div class="v num">${MM(P.cajaFin)}</div></div>
+      <div class="kpi ${P.cajaFin<0?'r':'b'}"><div class="k">Caja proyectada dic</div><div class="v num">${MM(P.cajaFin)}</div></div>
       <div class="kpi g"><div class="k">Base recurrente</div><div class="v num">${PCT(allInc?recInc/allInc:0)}</div><div class="m">de los ingresos 12m</div></div>
       <div class="kpi w"><div class="k">Concentración top-3</div><div class="v num">${PCT(allInc?top3/allInc:0)}</div><div class="m">${byc.slice(0,3).map(x=>x.c.split(' ')[0]).join(', ')}</div></div>
       <div class="kpi b"><div class="k">Factor gastos oficina</div><div class="v num">${PCT(R.factor)}</div></div>
