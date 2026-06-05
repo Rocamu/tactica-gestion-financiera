@@ -173,8 +173,14 @@ const costAllM=m=>ENT.reduce((a,e)=>a+(g(DATA.costAll,e)[m]||0),0);
 const retM=m=>ENT.reduce((a,e)=>a+(g(DATA.retiros,e)[m]||0),0);
 function lastN(n){return DATA.months.slice(-n);}
 function sumInc(c,ms){return ms.reduce((a,m)=>a+incM(c,m),0);}
+function lastRealMonth(){return DATA.months[DATA.months.length-1];}
 function periodMonths(){
   if(state.view==='mes') return [state.socioMonth||currentMonthKey()];
+  if(state.view==='semestre') return lastN(6);
+  return lastN(12);
+}
+function realPeriodMonths(){
+  if(state.view==='mes') return [lastRealMonth()];
   if(state.view==='semestre') return lastN(6);
   return lastN(12);
 }
@@ -182,6 +188,11 @@ function periodLabel(){
   if(state.view==='mes') return DATA.months.includes(state.socioMonth)?monLabel(state.socioMonth):`${monLabel(state.socioMonth)} · proyectado`;
   if(state.view==='semestre') return 'últimos 6 meses';
   return 'últimos 12 meses';
+}
+function realPeriodLabel(){
+  if(state.view==='mes') return `último mes real: ${monLabel(lastRealMonth())}`;
+  if(state.view==='semestre') return 'últimos 6 meses reales';
+  return 'últimos 12 meses reales';
 }
 function groupedMonths(ms, mode){
   if(mode==='mes') return ms.map(m=>[m]);
@@ -377,7 +388,7 @@ function flowChart(real,proj){
   const yV=v=>pad.t+ih-(v/maxV)*ih;
   let s='';for(let t=0;t<=1;t+=.5){const y=pad.t+ih-t*ih;s+=`<line x1="${pad.l}" y1="${y}" x2="${W-pad.r}" y2="${y}" stroke="var(--grid)"/><text x="${pad.l-7}" y="${y+3}" text-anchor="end" font-size="9" fill="var(--faint)">${MM(maxV*t)}</text>`;}
   const divX=pad.l+real.length*bw;
-  s+=`<line x1="${divX}" y1="${pad.t}" x2="${divX}" y2="${pad.t+ih}" stroke="var(--warn)" stroke-dasharray="3 3" opacity=".6"/><text x="${divX+3}" y="${pad.t+9}" font-size="8" fill="var(--warn)">hoy</text>`;
+  s+=`<line x1="${divX}" y1="${pad.t}" x2="${divX}" y2="${pad.t+ih}" stroke="var(--warn)" stroke-dasharray="3 3" opacity=".6"/><text x="${divX+3}" y="${pad.t+9}" font-size="8" fill="var(--warn)">proy.</text>`;
   all.forEach((r,i)=>{const cx=pad.l+i*bw+bw/2,proj=i>=real.length,op=proj?.5:.95;
     s+=`<rect x="${cx-bar-1.5}" y="${yV(r.inc)}" width="${bar}" height="${pad.t+ih-yV(r.inc)}" rx="2" fill="var(--accent)" opacity="${op}"/>`;
     s+=`<rect x="${cx+1.5}" y="${yV(r.egr)}" width="${bar}" height="${pad.t+ih-yV(r.egr)}" rx="2" fill="var(--neg)" opacity="${op*.8}"/>`;
@@ -451,22 +462,22 @@ render.flujo=()=>{
   const real=realGroups.map(g=>{const inc=clients().reduce((a,c)=>a+sumInc(c,g),0);const egr=-(g.reduce((a,m)=>a+officeM(m)+costAllM(m),0));return{label:g.length===1?monLabel(g[0]):`${monLabel(g[0])}-${monLabel(g[g.length-1])}`,inc,egr};});
   const projGroups=groupedMonths(P.fut,state.view);
   const proj=projGroups.map(g=>({label:g.length===1?monLabel(g[0]):`${monLabel(g[0])}-${monLabel(g[g.length-1])}`,inc:P.incMonthly*g.length,egr:P.expMonthly*g.length}));
-  // breakdown por cliente período visible (último año real para la tabla)
-  const ms = periodMonths();
+  // breakdown por cliente sobre cartola real disponible; no usa meses futuros.
+  const ms = realPeriodMonths();
   const byc=clients().map(c=>({c,rec:isRec(c),real:sumInc(c,ms),mensual:ms.length?sumInc(c,ms)/ms.length:0,proj:projMonthlyClient(c)})).filter(x=>x.real>0||x.proj>0).sort((a,b)=>b.real-a.real);
   document.getElementById('s-flujo').innerHTML=`
     <div class="mhead"><div><h2>Flujo de Caja</h2><div class="sub">Real hasta abril 2026 y proyección operacional hasta diciembre. La proyección no incluye retiros de socios.</div></div>
       <div class="seg" id="seg-view">${['mes','semestre','año'].map((v,i)=>`<button class="${(state.view===v||(v==='año'&&state.view==='año'))?'on':''}" data-v="${v==='año'?'año':v}">${v[0].toUpperCase()+v.slice(1)}</button>`).join('')}</div>
     </div>
     <div class="kpis">
-      <div class="kpi b"><div class="k">Ingreso op./mes</div><div class="v num">${MM(P.incMonthly)}</div><div class="m">rec ${MM(P.recM)} · esp ${MM(P.spoM)}</div></div>
-      <div class="kpi r"><div class="k">Egreso op./mes</div><div class="v num">${MM(P.expMonthly)}</div></div>
-      <div class="kpi ${P.net>=0?'g':'r'}"><div class="k">Flujo op./mes</div><div class="v num">${MM(P.net)}</div></div>
+      <div class="kpi b"><div class="k">Ingreso proyectado/mes</div><div class="v num">${MM(P.incMonthly)}</div><div class="m">rec ${MM(P.recM)} · esp ${MM(P.spoM)}</div></div>
+      <div class="kpi r"><div class="k">Egreso proyectado/mes</div><div class="v num">${MM(P.expMonthly)}</div></div>
+      <div class="kpi ${P.net>=0?'g':'r'}"><div class="k">Flujo proyectado/mes</div><div class="v num">${MM(P.net)}</div></div>
       <div class="kpi ${P.cajaFin<0?'r':'b'}"><div class="k">Caja proyectada dic</div><div class="v num">${MM(P.cajaFin)}</div></div>
     </div>
 	    <div class="panel"><h3>Ingresos y egresos · real + proyectado<span class="tag">${state.view} · hasta dic-2026</span></h3>${flowChart(real,proj)}
-	      <div class="legend"><span><i class="dot" style="background:var(--accent)"></i>Ingreso</span><span><i class="dot" style="background:var(--neg)"></i>Egreso</span><span style="color:var(--warn)">▏ línea = hoy · barras tenues = proyección</span></div></div>
-	    <div class="panel"><h3>Ingresos por cliente<span class="tag">${periodLabel()}</span></h3>
+	      <div class="legend"><span><i class="dot" style="background:var(--accent)"></i>Ingreso</span><span><i class="dot" style="background:var(--neg)"></i>Egreso</span><span style="color:var(--warn)">▏ línea = inicio de proyección · barras tenues = proyección</span></div></div>
+	    <div class="panel"><h3>Ingresos por cliente<span class="tag">${realPeriodLabel()} · real vs proyección mensual</span></h3>
 	      <div class="legend" style="margin:0 0 10px"><span><i class="dot rec"></i>Recurrente</span><span><i class="dot spo"></i>Esporádico</span></div>
 	      <table><thead><tr><th>Cliente</th><th>Real período</th><th>Mensual real</th><th>Proyección mensual</th></tr></thead><tbody>
 	      ${byc.map(x=>`<tr><td><span class="dot ${x.rec?'rec':'spo'}"></span>${x.c}</td><td class="num">${MM(x.real)}</td><td class="num">${MM(x.mensual)}</td><td class="num mut">${MM(x.proj)}</td></tr>`).join('')}
@@ -476,12 +487,12 @@ render.flujo=()=>{
 
 render.clientes=()=>{
   if(state.openClient){renderClientDetail(state.openClient);return;}
-  const ms=periodMonths();
+  const ms=realPeriodMonths();
   const list=clients().map(c=>({c,real:sumInc(c,ms),mensual:ms.length?sumInc(c,ms)/ms.length:0,proj:projMonthlyClient(c)})).filter(x=>x.real>0||x.proj>0).sort((a,b)=>b.real-a.real);
   document.getElementById('s-clientes').innerHTML=`
     <div class="mhead"><div><h2>Clientes</h2><div class="sub">Cobrado por período, promedio mensual real y proyección mensual. La facturación emitida queda pendiente de integrar.</div></div>
       <div class="seg" id="seg-clientes">${['mes','semestre','año'].map(v=>`<button class="${state.view===v?'on':''}" data-v="${v}">${v[0].toUpperCase()+v.slice(1)}</button>`).join('')}</div></div>
-    <div class="panel"><h3>Ingresos proyectados por cliente<span class="tag">${periodLabel()} · mensual, no anualizado</span></h3>
+    <div class="panel"><h3>Ingresos proyectados por cliente<span class="tag">${realPeriodLabel()} · mensual, no anualizado</span></h3>
       <table><thead><tr><th>Cliente</th><th>Real período</th><th>Mensual real</th><th>Proyección mensual</th><th>Tipo</th></tr></thead><tbody>
       ${list.map(x=>`<tr onclick="openClient('${x.c.replace(/'/g,"\\'")}')" style="cursor:pointer"><td><span class="dot ${isRec(x.c)?'rec':'spo'}"></span>${x.c}</td><td class="num">${MM(x.real)}</td><td class="num">${MM(x.mensual)}</td><td class="num mut">${MM(x.proj)}</td><td><span class="badge ${isRec(x.c)?'rec':'spo'}">${isRec(x.c)?'fijo/promedio':'editable'}</span></td></tr>`).join('')}
       </tbody></table></div>`;
