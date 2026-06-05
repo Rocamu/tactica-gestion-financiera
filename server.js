@@ -12,7 +12,7 @@ const path = require('path');
 const fs = require('fs');
 
 const DATA = JSON.parse(fs.readFileSync(path.join(__dirname, 'data.json'), 'utf8'));
-const ENT = ['TACTICA', 'C&A'], SOCIOS = ['RCM','REP','CTC','RCM-REP','SIN RM'];
+const ENT = ['TACTICA', 'C&A'], SOCIOS = ['RCM','REP','CTC','RCM-REP','SIN RM'], SOCIOS_REALES = ['RCM','REP','CTC'];
 const UF = DATA.indicadores?.UF || 39128;
 
 const g = (d,e)=>d[e]||{};
@@ -27,13 +27,46 @@ const findClient = q=>{const t=(q||'').toUpperCase();return clients().find(c=>t.
 const cAndAAdvanceM = m=>incM('ACCIONA (C&A)',m)+incM('HIDROMAULE (C&A)',m);
 const cAndAAdvance = ms=>ms.reduce((a,m)=>a+cAndAAdvanceM(m),0);
 const cAndARunRate = ()=>375*UF;
-const retiroSocioPeriod = (rm,ms)=>rm==='RCM' ? cAndAAdvance(ms) : 0;
+const retiroSocioPeriod = (rm,ms)=>rm==='RCM' ? ms.reduce((a,m)=>a+(DATA.months.includes(m)?cAndAAdvanceM(m):cAndARunRate()),0) : 0;
 
 function contribution(ms){
   const cls=clients().map(c=>{const ing=sumInc(c,ms),co=ms.reduce((a,m)=>a+costM(c,m),0);return{rm:DATA.rm[c]||'SIN RM',ing,margen:ing+co};});
   const totM=cls.reduce((a,r)=>a+r.margen,0),offAbs=-ms.reduce((a,m)=>a+officeM(m),0),f=totM>0?offAbs/totM:0;
   return SOCIOS.map(rm=>{const grp=cls.filter(r=>r.rm===rm);const ing=grp.reduce((a,r)=>a+r.ing,0);const mg=grp.reduce((a,r)=>a+r.margen,0);
     const fee=ing*0.20, rep=mg-mg*f-fee; return{rm,total:fee+rep};});
+}
+function futureMonths(){
+  const last=DATA.months[DATA.months.length-1].split('-').map(Number);
+  const out=[];let y=last[0],mo=last[1];
+  while(!(y===2026&&mo>=12)){mo++;if(mo>12){mo=1;y++;}out.push(`${y}-${String(mo).padStart(2,'0')}`);if(y>2026)break;}
+  return out;
+}
+function splitOwners(rm){
+  if(rm==='RCM-REP') return [{rm:'RCM',w:.5},{rm:'REP',w:.5}];
+  if(SOCIOS_REALES.includes(rm)) return [{rm,w:1}];
+  return [];
+}
+function projectedContributionBySocio(){
+  const l3=lastN(3);
+  const projClient=c=>sumInc(c,l3)/3;
+  const rows=clients().map(c=>({rm:DATA.rm[c]||'SIN RM',ing:projClient(c),margen:projClient(c)}));
+  const totM=rows.reduce((a,r)=>a+r.margen,0);
+  const exp=-(l3.reduce((a,m)=>a+officeM(m),0))/3;
+  const factor=totM>0?exp/totM:0;
+  return SOCIOS.map(rm=>{
+    const grp=rows.filter(r=>r.rm===rm), ing=grp.reduce((a,r)=>a+r.ing,0), margen=grp.reduce((a,r)=>a+r.margen,0);
+    const fee=ing*.20, contrib=margen*factor, repartir=margen-contrib-fee;
+    return {rm,total:fee+repartir};
+  });
+}
+function allocatedSocioValue(rows, rm){
+  let total=0;
+  rows.forEach(row=>splitOwners(row.rm).forEach(o=>{if(o.rm===rm) total += row.total*o.w;}));
+  return total;
+}
+function contributionForMonth(m, rm){
+  const raw = DATA.months.includes(m) ? contribution([m]) : projectedContributionBySocio();
+  return allocatedSocioValue(raw, rm);
 }
 
 /* ---- FUNCIONES DETERMINISTAS (las ejecuta el servidor, no la IA) ---- */
@@ -53,11 +86,11 @@ const FUNCS = {
     return {fecha, socios: soc};
   },
   retiro_mes_socio: ({socio, fecha})=>{
-    const rm=SOCIOS.find(s=>(socio||'').toUpperCase().includes(s)); if(!rm) return {error:'socio no encontrado'};
-    const m = DATA.months.includes(fecha) ? fecha : DATA.months[DATA.months.length-1];
-    const s=contribution([m]).find(x=>x.rm===rm)||{total:0};
-    const anticipo=retiroSocioPeriod(rm,[m]), saldo=s.total-anticipo;
-    return {socio:rm, fecha:m, devengado:Math.round(s.total), anticipo:Math.round(anticipo), saldo:Math.round(saldo), c_and_a_run_rate_futuro:Math.round(rm==='RCM'?cAndARunRate():0)};
+    const rm=SOCIOS_REALES.find(s=>(socio||'').toUpperCase().includes(s)); if(!rm) return {error:'socio no encontrado'};
+    const m = DATA.months.includes(fecha)||futureMonths().includes(fecha) ? fecha : DATA.months[DATA.months.length-1];
+    const total=contributionForMonth(m,rm);
+    const anticipo=retiroSocioPeriod(rm,[m]), saldo=total-anticipo;
+    return {socio:rm, fecha:m, devengado:Math.round(total), anticipo:Math.round(anticipo), saldo:Math.round(saldo), c_and_a_run_rate_futuro:Math.round(rm==='RCM'?cAndARunRate():0)};
   },
   saldo_socio: ({socio})=>{
     const rm=SOCIOS.find(s=>(socio||'').toUpperCase().includes(s)); if(!rm) return {error:'socio no encontrado'};
