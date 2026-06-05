@@ -2,9 +2,9 @@
  * MONITOR TÁCTICA — Módulo Gestión Financiera (backend)
  * Sirve el front-end y expone /api/chat: el chatbot.
  *
- * SEGURIDAD: la llave de DeepSeek se lee de la variable de entorno DEEPSEEK_API_KEY.
- * NUNCA se escribe en el código ni se envía al navegador. Los datos financieros
- * (data.json) viven aquí, en el servidor; a DeepSeek solo viaja la PREGUNTA del
+ * SEGURIDAD: la llave y endpoint de IA se leen desde variables de entorno.
+ * NUNCA se escriben en el código ni se envían al navegador. Los datos financieros
+ * (data.json) viven aquí, en el servidor; a la IA solo viaja la PREGUNTA del
  * usuario, el catálogo de funciones y el RESULTADO ya calculado localmente.
  */
 const express = require('express');
@@ -240,14 +240,16 @@ function localStructuredAnswer(q){
   return null;
 }
 
-async function deepseek(messages, tools){
-  const key = process.env.DEEPSEEK_API_KEY;
-  if(!key) throw new Error('DEEPSEEK_API_KEY no configurada');
-  const r = await fetch('https://api.deepseek.com/chat/completions', {
+async function callAi(messages, tools){
+  const key = process.env.AI_API_KEY;
+  const url = process.env.AI_API_URL;
+  const model = process.env.AI_MODEL;
+  if(!key || !url || !model) throw new Error('IA financiera no configurada');
+  const r = await fetch(url, {
     method:'POST', headers:{'Content-Type':'application/json','Authorization':'Bearer '+key},
-    body: JSON.stringify({ model:'deepseek-v4-pro', messages, tools, temperature:0.2 })
+    body: JSON.stringify({ model, messages, tools, temperature:0.2 })
   });
-  if(!r.ok) throw new Error('DeepSeek '+r.status);
+  if(!r.ok) throw new Error('IA financiera no disponible');
   return (await r.json()).choices[0].message;
 }
 
@@ -269,7 +271,7 @@ app.post('/api/chat', async (req,res)=>{
     const sys = 'Eres el asistente financiero de Táctica. Responde en español, breve y preciso. '+
       'Usa SIEMPRE las funciones para obtener cifras; nunca inventes números. Las cifras vienen ya calculadas.';
     let messages = [{role:'system',content:sys},{role:'user',content:q}];
-    let msg = await deepseek(messages, TOOLS);
+    let msg = await callAi(messages, TOOLS);
     if(msg.tool_calls && msg.tool_calls.length){
       messages.push(msg);
       for(const tc of msg.tool_calls){
@@ -278,10 +280,10 @@ app.post('/api/chat', async (req,res)=>{
         const result = fn ? fn(args) : {error:'función desconocida'};
         messages.push({role:'tool', tool_call_id:tc.id, content: JSON.stringify(result)});
       }
-      msg = await deepseek(messages, TOOLS);
+      msg = await callAi(messages, TOOLS);
     }
     res.json({answer: msg.content || 'Sin respuesta.'});
-  }catch(e){ res.status(500).json({answer:'Error: '+e.message}); }
+  }catch(e){ res.status(500).json({answer:e.message || 'IA financiera no disponible'}); }
 });
 
 const PORT = process.env.PORT || 3000;

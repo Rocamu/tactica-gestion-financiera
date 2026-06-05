@@ -10,7 +10,11 @@ services:
     startCommand: npm start
     autoDeploy: true
     envVars:
-      - key: DEEPSEEK_API_KEY
+      - key: AI_API_KEY
         sync: false          # SECRETO: Render lo pide al crear el Blueprint; NO se guarda en el repo
+      - key: AI_API_URL
+        sync: false
+      - key: AI_MODEL
+        sync: false
       - key: NODE_VERSION
         value: "20"
