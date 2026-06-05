@@ -228,12 +228,41 @@ function bindMonthSelects(){
     applyRoute();
   });
 }
+const CLIENTES_SIN_PROYECCION=new Set([
+  'BESALCO',
+  'PEDIDOS YA',
+  'EDUCACIÓN',
+  'CORREA SQUELLA',
+  'ENORCHILE',
+  'PESCO SERVICIOS (GRUPO PSG)',
+  'BULLA',
+  'PXS',
+  'ASOCIACIÓN DE COMERCIALIZADORES (ACEN)',
+  'EMPRESA ELECTRICA AGUAS DEL MELADO SPA',
+  'CÁMARA NACIONAL DE COMERCIO',
+  'AXESS SOLUTIONS',
+  'ASOCIACIÓN DE AFP'
+]);
+function monthDistance(a,b){
+  const [ay,am]=a.split('-').map(Number), [by,bm]=b.split('-').map(Number);
+  return (by-ay)*12+(bm-am);
+}
+function lastIncomeMonth(c){
+  const ms=DATA.months.filter(m=>incM(c,m)>0);
+  return ms[ms.length-1]||null;
+}
+function isProjectionClosed(c){
+  if(CLIENTES_SIN_PROYECCION.has(c)) return true;
+  const last=lastIncomeMonth(c);
+  return !last || monthDistance(last,currentMonthKey())>=12;
+}
 /* recurrente por defecto: ingreso en >=6 de los últimos 12 meses */
 const REC=(()=>{const l12=lastN(12),f={};clients().forEach(c=>{let k=0;l12.forEach(m=>{if(incM(c,m)>0)k++;});f[c]=k>=6;});return f;})();
 const isRec=c=>state.rec[c];
 
 /* proyección por cliente (mensual) */
 function projMonthlyClient(c){
+  if(isProjectionClosed(c)) return 0;
   const l3=lastN(3);
   if(isRec(c)) return sumInc(c,l3)/3;          // recurrente: run-rate reciente
   if(c in state.projOverride) return state.projOverride[c]; // esporádico: completado por el usuario

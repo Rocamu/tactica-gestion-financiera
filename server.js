@@ -29,6 +29,42 @@ const cAndAAdvanceM = m=>incM('ACCIONA (C&A)',m)+incM('HIDROMAULE (C&A)',m);
 const cAndAAdvance = ms=>ms.reduce((a,m)=>a+cAndAAdvanceM(m),0);
 const cAndARunRate = ()=>375*UF;
 const retiroSocioPeriod = (rm,ms)=>rm==='RCM' ? ms.reduce((a,m)=>a+(DATA.months.includes(m)?cAndAAdvanceM(m):cAndARunRate()),0) : 0;
+const CLIENTES_SIN_PROYECCION=new Set([
+  'BESALCO',
+  'PEDIDOS YA',
+  'EDUCACIÓN',
+  'CORREA SQUELLA',
+  'ENORCHILE',
+  'PESCO SERVICIOS (GRUPO PSG)',
+  'BULLA',
+  'PXS',
+  'ASOCIACIÓN DE COMERCIALIZADORES (ACEN)',
+  'EMPRESA ELECTRICA AGUAS DEL MELADO SPA',
+  'CÁMARA NACIONAL DE COMERCIO',
+  'AXESS SOLUTIONS',
+  'ASOCIACIÓN DE AFP'
+]);
+function currentMonthKey(){
+  const d=new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+}
+function monthDistance(a,b){
+  const [ay,am]=a.split('-').map(Number), [by,bm]=b.split('-').map(Number);
+  return (by-ay)*12+(bm-am);
+}
+function lastIncomeMonth(c){
+  const ms=DATA.months.filter(m=>incM(c,m)>0);
+  return ms[ms.length-1]||null;
+}
+function isProjectionClosed(c){
+  if(CLIENTES_SIN_PROYECCION.has(c)) return true;
+  const last=lastIncomeMonth(c);
+  return !last || monthDistance(last,currentMonthKey())>=12;
+}
+function projMonthlyClient(c){
+  if(isProjectionClosed(c)) return 0;
+  return sumInc(c,lastN(3))/3;
+}
 
 function contribution(ms){
   const cls=clients().map(c=>{const ing=sumInc(c,ms),co=ms.reduce((a,m)=>a+costM(c,m),0);return{rm:DATA.rm[c]||'SIN RM',ing,margen:ing+co};});
@@ -49,8 +85,7 @@ function splitOwners(rm){
 }
 function projectedContributionBySocio(){
   const l3=lastN(3);
-  const projClient=c=>sumInc(c,l3)/3;
-  const rows=clients().map(c=>({rm:DATA.rm[c]||'SIN RM',ing:projClient(c),margen:projClient(c)}));
+  const rows=clients().map(c=>({rm:DATA.rm[c]||'SIN RM',ing:projMonthlyClient(c),margen:projMonthlyClient(c)}));
   const totM=rows.reduce((a,r)=>a+r.margen,0);
   const exp=-(l3.reduce((a,m)=>a+officeM(m)+costAllM(m),0))/3;
   const factor=totM>0?exp/totM:0;
