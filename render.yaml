@@ -1,0 +1,16 @@
+# Render Blueprint — Módulo Gestión Financiera de MONITOR TÁCTICA
+# Servicio independiente (NO fusionar con MONITOR).
+services:
+  - type: web
+    name: tactica-gestion-financiera
+    runtime: node
+    plan: starter            # ajustar al plan deseado
+    region: oregon           # usar la misma región que MONITOR si aplica
+    buildCommand: npm install
+    startCommand: npm start
+    autoDeploy: true
+    envVars:
+      - key: DEEPSEEK_API_KEY
+        sync: false          # SECRETO: Render lo pide al crear el Blueprint; NO se guarda en el repo
+      - key: NODE_VERSION
+        value: "20"
