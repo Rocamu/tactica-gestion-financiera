@@ -13,7 +13,7 @@ const fs = require('fs');
 
 const DATA = JSON.parse(fs.readFileSync(path.join(__dirname, 'data.json'), 'utf8'));
 const ENT = ['TACTICA', 'C&A'], SOCIOS = ['RCM','REP','CTC','RCM-REP','SIN RM'];
-const RETIROS = { RCM:391156785, REP:83252123, CTC:91980334, 'RCM-REP':0, 'SIN RM':0 };
+const UF = DATA.indicadores?.UF || 39128;
 
 const g = (d,e)=>d[e]||{};
 const clients = ()=>{const s=new Set();ENT.forEach(e=>Object.keys(g(DATA.income,e)).forEach(c=>s.add(c)));return[...s];};
@@ -24,6 +24,10 @@ const lastN = n=>DATA.months.slice(-n);
 const sumInc = (c,ms)=>ms.reduce((a,m)=>a+incM(c,m),0);
 const CLP = n=>'$'+Math.round(n).toLocaleString('es-CL');
 const findClient = q=>{const t=(q||'').toUpperCase();return clients().find(c=>t.includes(c.toUpperCase().split(' ')[0])&&c.split(' ')[0].length>2)||clients().find(c=>t.includes(c.toUpperCase()));};
+const cAndAAdvanceM = m=>incM('ACCIONA (C&A)',m)+incM('HIDROMAULE (C&A)',m);
+const cAndAAdvance = ms=>ms.reduce((a,m)=>a+cAndAAdvanceM(m),0);
+const cAndARunRate = ()=>375*UF;
+const retiroSocioPeriod = (rm,ms)=>rm==='RCM' ? cAndAAdvance(ms) : 0;
 
 function contribution(ms){
   const cls=clients().map(c=>{const ing=sumInc(c,ms),co=ms.reduce((a,m)=>a+costM(c,m),0);return{rm:DATA.rm[c]||'SIN RM',ing,margen:ing+co};});
@@ -41,19 +45,31 @@ const FUNCS = {
   reparto_a_fecha: ({fecha})=>{ // fecha 'YYYY-MM'
     const ms = DATA.months.filter(m=>m<=fecha);
     const soc = contribution(ms).filter(s=>s.total!==0)
-      .map(s=>({socio:s.rm, distribuible_neto: Math.round(s.total-(RETIROS[s.rm]||0)), formato: CLP(s.total-(RETIROS[s.rm]||0))}));
+      .map(s=>{
+        const anticipo = retiroSocioPeriod(s.rm, ms);
+        const saldo = s.total - anticipo;
+        return {socio:s.rm, devengado:Math.round(s.total), anticipo:Math.round(anticipo), saldo:Math.round(saldo), formato:CLP(saldo)};
+      });
     return {fecha, socios: soc};
+  },
+  retiro_mes_socio: ({socio, fecha})=>{
+    const rm=SOCIOS.find(s=>(socio||'').toUpperCase().includes(s)); if(!rm) return {error:'socio no encontrado'};
+    const m = DATA.months.includes(fecha) ? fecha : DATA.months[DATA.months.length-1];
+    const s=contribution([m]).find(x=>x.rm===rm)||{total:0};
+    const anticipo=retiroSocioPeriod(rm,[m]), saldo=s.total-anticipo;
+    return {socio:rm, fecha:m, devengado:Math.round(s.total), anticipo:Math.round(anticipo), saldo:Math.round(saldo), c_and_a_run_rate_futuro:Math.round(rm==='RCM'?cAndARunRate():0)};
   },
   saldo_socio: ({socio})=>{
     const rm=SOCIOS.find(s=>(socio||'').toUpperCase().includes(s)); if(!rm) return {error:'socio no encontrado'};
-    const s=contribution(DATA.months).find(x=>x.rm===rm); const saldo=(s?s.total:0)-(RETIROS[rm]||0);
+    const s=contribution(DATA.months).find(x=>x.rm===rm); const saldo=(s?s.total:0)-retiroSocioPeriod(rm,DATA.months);
     return {socio:rm, saldo:Math.round(saldo), formato:CLP(saldo)};
   }
 };
 const TOOLS = [
   {type:'function',function:{name:'ingresos_cliente',description:'Ingresos cobrados de un cliente en los últimos N meses',parameters:{type:'object',properties:{cliente:{type:'string'},meses:{type:'integer'}},required:['cliente']}}},
-  {type:'function',function:{name:'reparto_a_fecha',description:'Monto distribuible por socio acumulado hasta una fecha YYYY-MM, neto de retiros',parameters:{type:'object',properties:{fecha:{type:'string',description:'YYYY-MM'}},required:['fecha']}}},
-  {type:'function',function:{name:'saldo_socio',description:'Saldo distribuible no retirado de un socio (RCM, REP, CTC)',parameters:{type:'object',properties:{socio:{type:'string'}},required:['socio']}}},
+  {type:'function',function:{name:'reparto_a_fecha',description:'Monto devengado y saldo por socio acumulado hasta una fecha YYYY-MM. Solo descuenta anticipos C&A de RCM; no inventa retiros mensuales para otros socios.',parameters:{type:'object',properties:{fecha:{type:'string',description:'YYYY-MM'}},required:['fecha']}}},
+  {type:'function',function:{name:'retiro_mes_socio',description:'Monto que le tocó o podría retirar un socio en un mes YYYY-MM. Solo RCM puede tener anticipo mensual por C&A Acciona/Hidro Maule.',parameters:{type:'object',properties:{socio:{type:'string'},fecha:{type:'string',description:'YYYY-MM'}},required:['socio','fecha']}}},
+  {type:'function',function:{name:'saldo_socio',description:'Saldo distribuible acumulado de un socio (RCM, REP, CTC), descontando solo anticipos C&A de RCM',parameters:{type:'object',properties:{socio:{type:'string'}},required:['socio']}}},
 ];
 
 const MONTHS_ES = {
@@ -64,6 +80,11 @@ const MONTHS_ES = {
 function localStructuredAnswer(q){
   const text = (q || '').toLowerCase();
   const monthMatch = text.match(/(\d+)\s*mes/);
+  const socio = SOCIOS.find(s => q.toUpperCase().includes(s));
+  let fecha = DATA.months[DATA.months.length - 1];
+  const monthName = Object.keys(MONTHS_ES).find(m => text.includes(m));
+  const yearMatch = text.match(/20\d\d/);
+  if (monthName && yearMatch) fecha = `${yearMatch[0]}-${MONTHS_ES[monthName]}`;
   if (/(ingres|factur|cobr|cu[aá]nto.*(entr|ingres))/.test(text)) {
     const cliente = findClient(q);
     if (cliente) {
@@ -73,15 +94,14 @@ function localStructuredAnswer(q){
     }
   }
   if (/repart|retir.*socio|cu[aá]nto.*retir/.test(text)) {
-    let fecha = DATA.months[DATA.months.length - 1];
-    const monthName = Object.keys(MONTHS_ES).find(m => text.includes(m));
-    const yearMatch = text.match(/20\d\d/);
-    if (monthName && yearMatch) fecha = `${yearMatch[0]}-${MONTHS_ES[monthName]}`;
+    if (socio && monthName && yearMatch) {
+      const result = FUNCS.retiro_mes_socio({ socio, fecha });
+      return `${result.socio} en ${result.fecha}: le toca o podría retirar ${CLP(result.devengado)}. Anticipo/retiro imputado: ${CLP(result.anticipo)}${result.socio==='RCM' ? ' (C&A Acciona + Hidro Maule)' : ''}. Saldo del mes: ${CLP(result.saldo)}.`;
+    }
     const result = FUNCS.reparto_a_fecha({ fecha });
-    return `Distribuible acumulado hasta ${fecha}, neto de retiros: ${result.socios.map(s => `${s.socio}: ${s.formato}`).join(' · ')}.`;
+    return `Distribuible acumulado hasta ${fecha}: ${result.socios.map(s => `${s.socio}: devengado ${CLP(s.devengado)}, anticipo ${CLP(s.anticipo)}, saldo ${s.formato}`).join(' · ')}. Solo RCM descuenta C&A como anticipo; no se imputan retiros mensuales a REP/CTC.`;
   }
   if (/saldo/.test(text)) {
-    const socio = SOCIOS.find(s => q.toUpperCase().includes(s));
     if (socio) {
       const result = FUNCS.saldo_socio({ socio });
       return `Saldo no retirado de ${result.socio}: ${result.formato}.`;
