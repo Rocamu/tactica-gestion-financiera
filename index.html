@@ -159,8 +159,6 @@ const MM=n=>(n<0?'−':'')+'$'+(Math.abs(n)/1e6).toLocaleString('es-CL',{maximum
 const PCT=n=>(n*100).toFixed(1)+'%';
 const monLabel=m=>MN[+m.split('-')[1]-1]+'·'+m.split('-')[0].slice(2);
 function currentMonthKey(){
-  const forced=new URLSearchParams(location.search).get('month');
-  if(/^\d{4}-\d{2}$/.test(forced||'')) return forced;
   const d=new Date();
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
 }
@@ -392,13 +390,35 @@ function spark(c){const ms=lastN(12),v=ms.map(m=>incM(c,m)),mx=Math.max(...v,1),
 
 /* ===== ROUTING ===== */
 const TITLES={flujo:'Flujo de Caja',clientes:'Clientes',socios:'Socios',control:'Control de Gestión'};
-function go(where){
+function routeParts(){
+  const raw=(window.location.hash||'#home').slice(1);
+  const [whereRaw, detailRaw='']=raw.split('/');
+  const where=['home','flujo','clientes','socios','control'].includes(whereRaw)?whereRaw:'home';
+  let detail=null;
+  if(detailRaw){
+    try{detail=decodeURIComponent(detailRaw);}catch(e){detail=detailRaw;}
+  }
+  return {where,detail};
+}
+function routeHash(where,detail){
+  return detail?`${where}/${encodeURIComponent(detail)}`:where;
+}
+function setRoute(where,detail){
+  const next=routeHash(where,detail);
+  if((window.location.hash||'').slice(1)===next){applyRoute();return;}
+  window.location.hash=next;
+}
+function go(where){setRoute(where);}
+function applyRoute(){
+  const {where,detail}=routeParts();
+  state.openClient=where==='clientes'?detail:null;
+  state.openSocio=where==='socios'?detail:null;
   document.querySelectorAll('.screen').forEach(s=>s.classList.remove('on'));
   document.getElementById('s-'+where).classList.add('on');
   document.getElementById('crumb').innerHTML = where==='home' ? '' :
     `<button onclick="go('home')">← Inicio</button><span>/ ${TITLES[where]}</span>`;
   hideAnswer();
-  if(where!=='home') render[where]();
+  render[where]();
   window.scrollTo(0,0);
 }
 
@@ -469,6 +489,7 @@ render.clientes=()=>{
 };
 function renderClientDetail(c){
   const l12=lastN(12), cob=sumInc(c,l12), co=l12.reduce((a,m)=>a+costM(c,m),0), margen=cob+co, proj=projMonthlyClient(c);
+  const mensualReal=l12.length?cob/l12.length:0;
   const hist=DATA.months.slice(-12).map(m=>({label:monLabel(m),inc:incM(c,m)}));
   const mx=Math.max(...hist.map(h=>h.inc),1),W=620,H=120,bw=W/hist.length;
   let bars='';hist.forEach((h,i)=>{const ht=Math.max(h.inc/mx*100,h.inc>0?3:0);bars+=`<rect x="${i*bw+2}" y="${110-ht}" width="${bw-4}" height="${ht}" rx="2" fill="${isRec(c)?'var(--rec)':'var(--spo)'}" opacity="${h.inc>0?.85:.2}"/><text x="${i*bw+bw/2}" y="118" text-anchor="middle" font-size="7" fill="var(--faint)">${h.label}</text>`;});
@@ -476,8 +497,9 @@ function renderClientDetail(c){
     <div class="mhead"><div><h2>${c}</h2><div class="sub">${DATA.rm[c]||'SIN RM'} · <span class="${isRec(c)?'pos':''}">${isRec(c)?'recurrente':'esporádico'}</span></div></div>
       <button class="seg" style="padding:7px 13px;cursor:pointer" onclick="closeClient()">← Volver a clientes</button></div>
     <div class="kpis">
-      <div class="kpi r"><div class="k">Facturado (emitido)</div><div class="v num" style="color:var(--neg)">${MM(Math.round(cob*1.18))}</div><div class="m" style="color:var(--neg)">dato de ejemplo · no real</div></div>
       <div class="kpi b"><div class="k">Cobrado · 12m</div><div class="v num">${MM(cob)}</div></div>
+      <div class="kpi b"><div class="k">Promedio mensual real</div><div class="v num">${MM(mensualReal)}</div></div>
+      <div class="kpi ${isRec(c)?'g':'w'}"><div class="k">Proyección mensual</div><div class="v num">${MM(proj)}</div></div>
       <div class="kpi r"><div class="k">Costo directo · 12m</div><div class="v num">${co?MM(co):'—'}</div></div>
       <div class="kpi g"><div class="k">Margen · 12m</div><div class="v num">${MM(margen)}</div></div>
     </div>
@@ -488,8 +510,8 @@ function renderClientDetail(c){
         <div style="display:flex;gap:9px;align-items:center"><input class="num" id="proj-in" value="${Math.round(proj)}" style="width:150px"><button class="seg" style="padding:8px 14px;cursor:pointer" onclick="saveProj('${c.replace(/'/g,"\\'")}')">Guardar proyección</button></div>`}
     </div>`;
 }
-window.openClient=c=>{state.openClient=c;render.clientes();window.scrollTo(0,0);};
-window.closeClient=()=>{state.openClient=null;render.clientes();};
+window.openClient=c=>setRoute('clientes',c);
+window.closeClient=()=>setRoute('clientes');
 window.saveProj=c=>{state.projOverride[c]=+document.getElementById('proj-in').value||0;alert('Proyección guardada para '+c);};
 
 render.socios=()=>{
@@ -559,8 +581,8 @@ function renderSocioDetail(rm){
       </tbody></table></div>`;
   const sel=document.getElementById('socio-month'); if(sel) sel.onchange=()=>{state.socioMonth=sel.value;render.socios();};
 }
-window.openSocio=rm=>{state.openSocio=rm;render.socios();window.scrollTo(0,0);};
-window.closeSocio=()=>{state.openSocio=null;render.socios();window.scrollTo(0,0);};
+window.openSocio=rm=>setRoute('socios',rm);
+window.closeSocio=()=>setRoute('socios');
 
 render.control=()=>{
   const P=projection(), l12=lastN(12);
@@ -601,17 +623,20 @@ function localAnswer(q){
   }
   // reparto a fecha
   if(/repart|retir.*socio|cuánto.*retir/.test(t)){
-    if(socio && mFecha){
-      const R=contribution([upto]); const s=R.socio.find(x=>x.rm===socio)||{total:0};
-      const ret=retiroSocioPeriod(socio,[upto]), saldo=s.total-ret;
-      return{a:`${socio} en ${monLabel(upto)}: le toca o podría retirar <b>${CLP(s.total)}</b>. Anticipo/retiro imputado: <b>${CLP(ret)}</b>${socio==='RCM'?' por C&A Acciona + Hidro Maule':''}. Saldo del mes: <b>${CLP(saldo)}</b>.`,src:'motor local · socios mes a mes'};
+    if(socio && SOCIOS_REALES.includes(socio) && mFecha){
+      const b=balanceTimelineForSocio(socio).find(r=>r.m===upto);
+      if(b){
+        const acc=b.acc||{total:0,anticipos:0};
+        const last=b.lastRetiro?` Último retiro/corte: <b>${CLP(b.lastRetiro.monto)}</b> el ${fmtDate(b.lastRetiro.fecha)}.`:' Sin retiro/corte registrado.';
+        return{a:`${socio} en ${monLabel(upto)}: saldo acumulado desde último retiro/corte <b>${CLP(b.acum)}</b>. Devengado del mes: <b>${CLP(b.dev)}</b>. Anticipo del mes: <b>${CLP(b.anticipo)}</b>${socio==='RCM'?' por C&A Acciona + Hidro Maule':''}. Acumulado devengado: <b>${CLP(acc.total)}</b>; anticipos acumulados: <b>${CLP(acc.anticipos)}</b>.${last}`,src:'motor local · socios acumulado'};
+      }
     }
     const ms=DATA.months.filter(m=>m<=upto); const R=contribution(ms);
     const lines=R.socio.filter(s=>s.total!==0).map(s=>{const ret=retiroSocioPeriod(s.rm,ms);return`${s.rm}: devengado <b>${CLP(s.total)}</b>, anticipo <b>${CLP(ret)}</b>, saldo <b>${CLP(s.total-ret)}</b>`;}).join(' · ');
     return{a:`Distribuible acumulado hasta ${monLabel(upto)}: ${lines}. Solo RCM descuenta C&A como anticipo; no se imputan retiros mensuales a REP/CTC.`,src:'motor local · cascada de contribución'};
   }
   // saldo socio
-  if(/saldo/.test(t)){const rm=SOCIOS.find(s=>t.toUpperCase().includes(s));if(rm){const R=contribution(DATA.months);const s=R.socio.find(x=>x.rm===rm);const saldo=(s?s.total:0)-retiroSocioPeriod(rm,DATA.months);return{a:`Saldo no retirado de ${rm}: <b>${CLP(saldo)}</b>.`,src:'motor local'};}}
+  if(/saldo/.test(t)){const rm=SOCIOS_REALES.find(s=>t.toUpperCase().includes(s));if(rm){const rows=balanceTimelineForSocio(rm);const b=rows[rows.length-1];return{a:`Saldo acumulado de ${rm} al último mes disponible/proyectado: <b>${CLP(b?b.acum:0)}</b>.`,src:'motor local · socios acumulado'};}}
   return null;
 }
 async function ask(){
@@ -636,7 +661,11 @@ function chips(uf,dolar,euro,utm,live){document.getElementById('chips').innerHTM
 chips(UF,DOLAR,1032,71506,false);
 (async()=>{try{const r=await fetch('https://mindicador.cl/api');const d=await r.json();chips(Math.round(d.uf.valor),Math.round(d.dolar.valor),Math.round(d.euro.valor),Math.round(d.utm.valor),true);}catch(e){}})();
 
-render.home();
+window.addEventListener('hashchange',applyRoute);
+if(!window.location.hash){
+  window.history.replaceState(null,'',window.location.pathname+window.location.search+'#home');
+}
+applyRoute();
 </script>
 </body>
 </html>
