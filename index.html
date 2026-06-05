@@ -153,6 +153,8 @@
 /* ===== CONFIG ===== */
 const BACKEND = window.TACTICA_BACKEND || (location.protocol==='http:'||location.protocol==='https:' ? location.origin : "");
 const ENT=['TACTICA','C&A'], SOCIOS=['RCM','REP','CTC','RCM-REP','SIN RM'], SOCIOS_REALES=['RCM','REP','CTC'], UF=40661.48, DOLAR=888.36;
+const CAJA_INICIAL_CLP=18000000+48500*DOLAR;
+const SPECIAL_CLIENT_RM={'CSGI':'SIN RM'};
 const MN=['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
 const CLP=n=>(n<0?'−':'')+'$'+Math.round(Math.abs(n)).toLocaleString('es-CL');
 const MM=n=>(n<0?'−':'')+'$'+(Math.abs(n)/1e6).toLocaleString('es-CL',{maximumFractionDigits:Math.abs(n)<1e7?1:0})+' MM';
@@ -165,7 +167,8 @@ function currentMonthKey(){
 
 /* ===== DATA HELPERS ===== */
 const g=(d,e)=>d[e]||{};
-function clients(){const s=new Set();ENT.forEach(e=>{Object.keys(g(DATA.income,e)).forEach(c=>s.add(c));});return[...s];}
+function clients(){const s=new Set();ENT.forEach(e=>{Object.keys(g(DATA.income,e)).forEach(c=>s.add(c));});Object.keys(SPECIAL_CLIENT_RM).forEach(c=>s.add(c));return[...s];}
+function clientRM(c){return SPECIAL_CLIENT_RM[c]||DATA.rm[c]||'SIN RM';}
 const incM=(c,m)=>ENT.reduce((a,e)=>a+((g(DATA.income,e)[c]||{})[m]||0),0);
 const costM=(c,m)=>ENT.reduce((a,e)=>a+((g(DATA.cost,e)[c]||{})[m]||0),0);
 const officeM=m=>ENT.reduce((a,e)=>a+(g(DATA.office,e)[m]||0),0);
@@ -195,7 +198,7 @@ function realPeriodLabel(){
   return 'últimos 12 meses reales';
 }
 function periodClientAmount(c,ms){
-  if(state.view==='mes' && !DATA.months.includes(selectedMonth())) return projMonthlyClient(c);
+  if(state.view==='mes' && !DATA.months.includes(selectedMonth())) return projectedClientIncome(c,selectedMonth());
   return sumInc(c,ms);
 }
 function groupedMonths(ms, mode){
@@ -204,10 +207,12 @@ function groupedMonths(ms, mode){
   const out=[]; for(let i=0;i<ms.length;i+=size) out.push(ms.slice(i,i+size));
   return out;
 }
-function futureMonths(){ // desde el mes siguiente al último real hasta dic-2026
+function futureMonths(){ // desde el mes actual hasta mar-2027
   const last=DATA.months[DATA.months.length-1].split('-').map(Number);
+  const current=currentMonthKey().split('-').map(Number);
   const out=[];let y=last[0],mo=last[1];
-  while(!(y===2026&&mo>=12)){mo++;if(mo>12){mo=1;y++;}out.push(`${y}-${String(mo).padStart(2,'0')}`);if(y>2026)break;}
+  if(current[0]>y || (current[0]===y && current[1]>mo)){y=current[0];mo=current[1]-1;}
+  while(!(y===2027&&mo>=3)){mo++;if(mo>12){mo=1;y++;}out.push(`${y}-${String(mo).padStart(2,'0')}`);if(y>2027)break;}
   return out;
 }
 function selectableMonths(){
@@ -263,10 +268,19 @@ const isRec=c=>state.rec[c];
 /* proyección por cliente (mensual) */
 function projMonthlyClient(c){
   if(isProjectionClosed(c)) return 0;
+  if(c==='AGUAS ANDINAS') return 200*UF;
+  if(c==='CSGI') return 0;
   const l3=lastN(3);
   if(isRec(c)) return sumInc(c,l3)/3;          // recurrente: run-rate reciente
   if(c in state.projOverride) return state.projOverride[c]; // esporádico: completado por el usuario
   return sumInc(c,l3)/3;                         // default esporádico: prom 3m (editable)
+}
+function projectedClientIncome(c,m){
+  let v=projMonthlyClient(c);
+  if(c==='AGUAS ANDINAS' && m==='2026-05') return 0;
+  if(c==='AGUAS ANDINAS' && m==='2026-06') return 600*UF;
+  if(c==='CSGI' && m>='2026-08' && m<='2027-03') v+=160000*DOLAR/8;
+  return v;
 }
 function projExpenseMonthly(){const l3=lastN(3);return -(l3.reduce((a,m)=>a+officeM(m)+costAllM(m),0))/3;}
 function cAndAAdvanceM(m){
@@ -283,8 +297,8 @@ function retiroSocioPeriod(rm,ms){
   const ca = rm==='RCM' ? cAndAAdvance(ms) : 0;
   return ca;
 }
-function projectedContributionBySocio(){
-  const projectedClients=clients().map(c=>({c,rm:DATA.rm[c]||'SIN RM',ing:projMonthlyClient(c),margen:projMonthlyClient(c)}));
+function projectedContributionBySocio(m=selectedMonth()){
+  const projectedClients=clients().map(c=>({c,rm:clientRM(c),ing:projectedClientIncome(c,m),margen:projectedClientIncome(c,m)}));
   const totM=projectedClients.reduce((a,r)=>a+r.margen,0);
   const factor=totM>0?projExpenseMonthly()/totM:0;
   return SOCIOS.map(rm=>{
@@ -298,7 +312,7 @@ function projectedContributionBySocio(){
 /* ===== STATE ===== */
 const state={ view:'mes', sociosView:'mes', selectedMonth:defaultSelectedMonth(), socioMonth:defaultSelectedMonth(), openSocio:null, rec:JSON.parse(JSON.stringify(REC)), projOverride:{},
   retiros:JSON.parse(JSON.stringify(DATA.retirosSocio)),
-  minimo:{'RCM':46807630,'REP':46807630,'CTC':46807630,'RCM-REP':0,'SIN RM':0}, cajaInicial:0 };
+  minimo:{'RCM':46807630,'REP':46807630,'CTC':46807630,'RCM-REP':0,'SIN RM':0}, cajaInicial:CAJA_INICIAL_CLP };
 
 /* ===== CÁLCULO CONTRIBUCIÓN (período) ===== */
 function contribution(ms){
@@ -322,14 +336,14 @@ function allocatedSocioRows(ms){
   R.socio.forEach(row=>splitOwners(row.rm).forEach(o=>addAllocated(acc[o.rm],row,o.w)));
   return SOCIOS_REALES.map(rm=>{const r=acc[rm];r.ret=retiroSocioPeriod(rm,ms);r.saldo=r.total-r.ret;return r;});
 }
-function allocatedProjectionRows(){
-  const raw=projectedContributionBySocio(), acc=Object.fromEntries(SOCIOS_REALES.map(rm=>[rm,blankSocio(rm)]));
+function allocatedProjectionRows(m=selectedMonth()){
+  const raw=projectedContributionBySocio(m), acc=Object.fromEntries(SOCIOS_REALES.map(rm=>[rm,blankSocio(rm)]));
   raw.forEach(row=>splitOwners(row.rm).forEach(o=>addAllocated(acc[o.rm],row,o.w)));
   return SOCIOS_REALES.map(rm=>acc[rm]);
 }
 function allocatedRowsForMonth(m){
   if(DATA.months.includes(m)) return allocatedSocioRows([m]);
-  return allocatedProjectionRows().map(r=>{r.ret=0;r.saldo=r.total;return r;});
+  return allocatedProjectionRows(m).map(r=>{r.ret=0;r.saldo=r.total;return r;});
 }
 function clientShareForSocio(c,rm){
   const owner=DATA.rm[c]||'SIN RM';
@@ -419,9 +433,9 @@ function balanceTimelineForSocio(rm){
   const realBase=DATA.months.map(m=>{const x=allocatedSocioRows([m]).find(z=>z.rm===rm)||blankSocio(rm);return{m,ing:x.ing,contrib:x.contrib,fee:x.fee,repartir:x.repartir,dev:x.total};});
   const real=monthlyBalanceRows(rm,realBase).filter(r=>r.ing||r.dev||r.retiro);
   const last=real.length?real[real.length-1]:{acum:0,lastRetiro:null};
-  const proj=allocatedProjectionRows().find(x=>x.rm===rm)||blankSocio(rm);
   let acc=last.acc||{ing:0,contrib:0,fee:0,repartir:0,total:0,anticipos:0,saldo:last.acum||0};
   const fut=futureMonths().map(m=>{
+    const proj=allocatedProjectionRows(m).find(x=>x.rm===rm)||blankSocio(rm);
     const ant=anticipoMensual(rm,m);
     acc={ing:acc.ing+proj.ing,contrib:acc.contrib+proj.contrib,fee:acc.fee+proj.fee,repartir:acc.repartir+proj.repartir,total:acc.total+proj.total,anticipos:acc.anticipos+ant,saldo:acc.saldo+proj.total-ant};
     return{m,proj:true,ing:proj.ing,contrib:proj.contrib,fee:proj.fee,repartir:proj.repartir,dev:proj.total,retiro:0,anticipo:ant,acum:acc.saldo,acc:{...acc},lastRetiro:last.lastRetiro};
@@ -486,7 +500,7 @@ const render={};
 render.home=()=>{
   const P=projection(); const top=clients().sort((a,b)=>sumInc(b,lastN(12))-sumInc(a,lastN(12)));
   const cards=[
-    ['flujo','📈','Flujo de Caja','Real y proyectado a diciembre',MM(P.cajaFin),'Caja proyectada dic'],
+    ['flujo','📈','Flujo de Caja','Real y proyectado a marzo',MM(P.cajaFin),'Caja proyectada mar'],
     ['clientes','🗂️','Clientes','Cobrado, proyectado y margen',clients().length+' activos','Cartera'],
     ['socios','👥','Socios','Aporte, retiros y saldos','RCM '+PCT(0.707),'Mayor aporte'],
     ['control','🧭','Control de Gestión','Indicadores y alertas',MM(P.incMonthly),'Ingreso op./mes'],
@@ -496,11 +510,13 @@ render.home=()=>{
 
 function projection(){
   const fut=futureMonths(), eg=projExpenseMonthly();
-  const recM=clients().filter(isRec).reduce((a,c)=>a+projMonthlyClient(c),0);
-  const spoM=clients().filter(c=>!isRec(c)).reduce((a,c)=>a+projMonthlyClient(c),0);
-  const inc=recM+spoM, net=inc-eg;
-  let caja=state.cajaInicial; const rows=fut.map(m=>{caja+=net;return{label:monLabel(m),inc,egr:eg,net,caja};});
-  return{fut,recM,spoM,incMonthly:inc,expMonthly:eg,net,rows,cajaFin:rows.length?rows[rows.length-1].caja:caja};
+  const selected=selectedMonth();
+  const selectedInc=clients().reduce((a,c)=>a+projectedClientIncome(c,selected),0);
+  const recM=clients().filter(isRec).reduce((a,c)=>a+projectedClientIncome(c,selected),0);
+  const spoM=clients().filter(c=>!isRec(c)).reduce((a,c)=>a+projectedClientIncome(c,selected),0);
+  let caja=state.cajaInicial; const rows=fut.map(m=>{const inc=clients().reduce((a,c)=>a+projectedClientIncome(c,m),0),net=inc-eg;caja+=net;return{label:monLabel(m),inc,egr:eg,net,caja};});
+  const net=selectedInc-eg;
+  return{fut,recM,spoM,incMonthly:selectedInc,expMonthly:eg,net,rows,cajaFin:rows.length?rows[rows.length-1].caja:caja};
 }
 
 render.flujo=()=>{
@@ -512,9 +528,10 @@ render.flujo=()=>{
   const proj=projGroups.map(g=>({label:g.length===1?monLabel(g[0]):`${monLabel(g[0])}-${monLabel(g[g.length-1])}`,inc:P.incMonthly*g.length,egr:P.expMonthly*g.length}));
   // breakdown por cliente sobre cartola real disponible; no usa meses futuros.
   const ms = realPeriodMonths();
-  const byc=clients().map(c=>{const amount=periodClientAmount(c,ms);return{c,rec:isRec(c),real:amount,mensual:ms.length?amount/ms.length:0,proj:projMonthlyClient(c)};}).filter(x=>x.real>0||x.proj>0).sort((a,b)=>b.real-a.real);
+  const byc=clients().map(c=>{const amount=periodClientAmount(c,ms);return{c,rec:isRec(c),real:amount,mensual:ms.length?amount/ms.length:0,proj:projMonthlyClient(c)};}).filter(x=>state.view==='mes'?x.real>0:(x.real>0||x.proj>0)).sort((a,b)=>b.real-a.real);
+  const monthTable=state.view==='mes';
   document.getElementById('s-flujo').innerHTML=`
-    <div class="mhead"><div><h2>Flujo de Caja</h2><div class="sub">Real hasta abril 2026 y proyección operacional hasta diciembre. La proyección no incluye retiros de socios.</div></div>
+    <div class="mhead"><div><h2>Flujo de Caja</h2><div class="sub">Real hasta abril 2026 y proyección operacional hasta marzo 2027. La proyección no incluye retiros de socios.</div></div>
       <div class="seg" id="seg-view">${['mes','semestre','año'].map((v,i)=>`<button class="${(state.view===v||(v==='año'&&state.view==='año'))?'on':''}" data-v="${v==='año'?'año':v}">${v[0].toUpperCase()+v.slice(1)}</button>`).join('')}</div>
     </div>
     ${state.view==='mes'?`<div class="tools">${monthSelectHtml('flujo-month')}</div>`:''}
@@ -522,14 +539,14 @@ render.flujo=()=>{
       <div class="kpi b"><div class="k">Ingreso proyectado/mes</div><div class="v num">${MM(P.incMonthly)}</div><div class="m">rec ${MM(P.recM)} · esp ${MM(P.spoM)}</div></div>
       <div class="kpi r"><div class="k">Egreso proyectado/mes</div><div class="v num">${MM(P.expMonthly)}</div></div>
       <div class="kpi ${P.net>=0?'g':'r'}"><div class="k">Flujo proyectado/mes</div><div class="v num">${MM(P.net)}</div></div>
-      <div class="kpi ${P.cajaFin<0?'r':'b'}"><div class="k">Caja proyectada dic</div><div class="v num">${MM(P.cajaFin)}</div></div>
+      <div class="kpi ${P.cajaFin<0?'r':'b'}"><div class="k">Caja proyectada mar</div><div class="v num">${MM(P.cajaFin)}</div></div>
     </div>
-	    <div class="panel"><h3>Ingresos y egresos · real + proyectado<span class="tag">${state.view} · hasta dic-2026</span></h3>${flowChart(real,proj)}
+	    <div class="panel"><h3>Ingresos y egresos · real + proyectado<span class="tag">${state.view} · hasta mar-2027</span></h3>${flowChart(real,proj)}
 	      <div class="legend"><span><i class="dot" style="background:var(--accent)"></i>Ingreso</span><span><i class="dot" style="background:var(--neg)"></i>Egreso</span><span style="color:var(--warn)">▏ línea = inicio de proyección · barras tenues = proyección</span></div></div>
 	    <div class="panel"><h3>Ingresos por cliente<span class="tag">${realPeriodLabel()} · real vs proyección mensual</span></h3>
 	      <div class="legend" style="margin:0 0 10px"><span><i class="dot rec"></i>Recurrente</span><span><i class="dot spo"></i>Esporádico</span></div>
-	      <table><thead><tr><th>Cliente</th><th>Monto período</th><th>Mensual período</th><th>Proyección mensual</th></tr></thead><tbody>
-	      ${byc.map(x=>`<tr><td><span class="dot ${x.rec?'rec':'spo'}"></span>${x.c}</td><td class="num">${MM(x.real)}</td><td class="num">${MM(x.mensual)}</td><td class="num mut">${MM(x.proj)}</td></tr>`).join('')}
+	      <table><thead><tr><th>Cliente</th><th>${monthTable?'Monto del mes':'Monto período'}</th>${monthTable?'':'<th>Mensual período</th><th>Proyección mensual</th>'}</tr></thead><tbody>
+	      ${byc.map(x=>`<tr><td><span class="dot ${x.rec?'rec':'spo'}"></span>${x.c}</td><td class="num">${MM(x.real)}</td>${monthTable?'':`<td class="num">${MM(x.mensual)}</td><td class="num mut">${MM(x.proj)}</td>`}</tr>`).join('')}
 	      </tbody></table></div>`;
   document.querySelectorAll('#seg-view button').forEach(b=>{b.onclick=()=>{state.view=b.dataset.v;render.flujo();};});
   bindMonthSelects();
@@ -538,14 +555,15 @@ render.flujo=()=>{
 render.clientes=()=>{
   if(state.openClient){renderClientDetail(state.openClient);return;}
   const ms=realPeriodMonths();
-  const list=clients().map(c=>{const amount=periodClientAmount(c,ms);return{c,real:amount,mensual:ms.length?amount/ms.length:0,proj:projMonthlyClient(c)};}).filter(x=>x.real>0||x.proj>0).sort((a,b)=>b.real-a.real);
+  const list=clients().map(c=>{const amount=periodClientAmount(c,ms);return{c,real:amount,mensual:ms.length?amount/ms.length:0,proj:projMonthlyClient(c)};}).filter(x=>state.view==='mes'?x.real>0:(x.real>0||x.proj>0)).sort((a,b)=>b.real-a.real);
+  const monthTable=state.view==='mes';
   document.getElementById('s-clientes').innerHTML=`
     <div class="mhead"><div><h2>Clientes</h2><div class="sub">Cobrado por período, promedio mensual real y proyección mensual. La facturación emitida queda pendiente de integrar.</div></div>
       <div class="seg" id="seg-clientes">${['mes','semestre','año'].map(v=>`<button class="${state.view===v?'on':''}" data-v="${v}">${v[0].toUpperCase()+v.slice(1)}</button>`).join('')}</div></div>
     ${state.view==='mes'?`<div class="tools">${monthSelectHtml('clientes-month')}</div>`:''}
     <div class="panel"><h3>Ingresos proyectados por cliente<span class="tag">${realPeriodLabel()} · mensual, no anualizado</span></h3>
-      <table><thead><tr><th>Cliente</th><th>Monto período</th><th>Mensual período</th><th>Proyección mensual</th><th>Tipo</th></tr></thead><tbody>
-      ${list.map(x=>`<tr onclick="openClient('${x.c.replace(/'/g,"\\'")}')" style="cursor:pointer"><td><span class="dot ${isRec(x.c)?'rec':'spo'}"></span>${x.c}</td><td class="num">${MM(x.real)}</td><td class="num">${MM(x.mensual)}</td><td class="num mut">${MM(x.proj)}</td><td><span class="badge ${isRec(x.c)?'rec':'spo'}">${isRec(x.c)?'fijo/promedio':'editable'}</span></td></tr>`).join('')}
+      <table><thead><tr><th>Cliente</th><th>${monthTable?'Monto del mes':'Monto período'}</th>${monthTable?'':'<th>Mensual período</th><th>Proyección mensual</th>'}<th>Tipo</th></tr></thead><tbody>
+      ${list.map(x=>`<tr onclick="openClient('${x.c.replace(/'/g,"\\'")}')" style="cursor:pointer"><td><span class="dot ${isRec(x.c)?'rec':'spo'}"></span>${x.c}</td><td class="num">${MM(x.real)}</td>${monthTable?'':`<td class="num">${MM(x.mensual)}</td><td class="num mut">${MM(x.proj)}</td>`}<td><span class="badge ${isRec(x.c)?'rec':'spo'}">${isRec(x.c)?'fijo/promedio':'editable'}</span></td></tr>`).join('')}
       </tbody></table></div>`;
   document.querySelectorAll('#seg-clientes button').forEach(b=>b.onclick=()=>{state.view=b.dataset.v;render.clientes();});
   bindMonthSelects();
@@ -613,7 +631,7 @@ function renderSocioDetail(rm){
   const timeline=balanceTimelineForSocio(rm);
   const selectedBalance=timeline.find(r=>r.m===m)||timeline[timeline.length-1]||{acum:0,lastRetiro:null};
   const saldo=selectedBalance.acum, acc=selectedBalance.acc||{ing:0,contrib:0,fee:0,repartir:0,total:0,anticipos:0,saldo};
-  const clientRows=clients().map(c=>{const share=clientShareForSocio(c,rm);return{c,share,real:sumInc(c,ms)*share,proj:projMonthlyClient(c)*share,rm:DATA.rm[c]||'SIN RM'};}).filter(c=>c.share&&(c.real||c.proj)).sort((a,b)=>b.real-a.real);
+  const clientRows=clients().map(c=>{const share=clientShareForSocio(c,rm);return{c,share,real:sumInc(c,ms)*share,proj:projectedClientIncome(c,m)*share,rm:clientRM(c)};}).filter(c=>c.share&&(c.real||c.proj)).sort((a,b)=>b.real-a.real);
   const monthTag=`${monLabel(m)}${DATA.months.includes(m)?'':' · proyectado'}`;
   document.getElementById('s-socios').innerHTML=`
     <div class="mhead"><div><h2>${rm}</h2><div class="sub">Saldo acumulado al mes seleccionado. Incluye 50% de clientes RCM-REP cuando corresponde.</div></div>
@@ -660,7 +678,7 @@ render.control=()=>{
     <div class="mhead"><div><h2>Control de Gestión</h2><div class="sub">Síntesis visual de lo que más importa.</div></div></div>
     <div class="tools">${monthSelectHtml('control-month')}</div>
     <div class="kpis">
-      <div class="kpi ${P.cajaFin<0?'r':'b'}"><div class="k">Caja proyectada dic</div><div class="v num">${MM(P.cajaFin)}</div></div>
+      <div class="kpi ${P.cajaFin<0?'r':'b'}"><div class="k">Caja proyectada mar</div><div class="v num">${MM(P.cajaFin)}</div></div>
       <div class="kpi g"><div class="k">Base recurrente</div><div class="v num">${PCT(allInc?recInc/allInc:0)}</div><div class="m">de los ingresos 12m</div></div>
       <div class="kpi w"><div class="k">Concentración top-3</div><div class="v num">${PCT(allInc?top3/allInc:0)}</div><div class="m">${byc.slice(0,3).map(x=>x.c.split(' ')[0]).join(', ')}</div></div>
       <div class="kpi b"><div class="k">Factor gastos oficina</div><div class="v num">${PCT(R.factor)}</div></div>

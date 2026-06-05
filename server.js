@@ -13,10 +13,12 @@ const fs = require('fs');
 
 const DATA = JSON.parse(fs.readFileSync(path.join(__dirname, 'data.json'), 'utf8'));
 const ENT = ['TACTICA', 'C&A'], SOCIOS = ['RCM','REP','CTC','RCM-REP','SIN RM'], SOCIOS_REALES = ['RCM','REP','CTC'];
-const UF = 40661.48;
+const UF = 40661.48, DOLAR = 888.36;
+const SPECIAL_CLIENT_RM = {'CSGI':'SIN RM'};
 
 const g = (d,e)=>d[e]||{};
-const clients = ()=>{const s=new Set();ENT.forEach(e=>Object.keys(g(DATA.income,e)).forEach(c=>s.add(c)));return[...s];};
+const clients = ()=>{const s=new Set();ENT.forEach(e=>Object.keys(g(DATA.income,e)).forEach(c=>s.add(c)));Object.keys(SPECIAL_CLIENT_RM).forEach(c=>s.add(c));return[...s];};
+const clientRM = c=>SPECIAL_CLIENT_RM[c]||DATA.rm[c]||'SIN RM';
 const incM = (c,m)=>ENT.reduce((a,e)=>a+((g(DATA.income,e)[c]||{})[m]||0),0);
 const costM = (c,m)=>ENT.reduce((a,e)=>a+((g(DATA.cost,e)[c]||{})[m]||0),0);
 const officeM = m=>ENT.reduce((a,e)=>a+(g(DATA.office,e)[m]||0),0);
@@ -63,7 +65,16 @@ function isProjectionClosed(c){
 }
 function projMonthlyClient(c){
   if(isProjectionClosed(c)) return 0;
+  if(c==='AGUAS ANDINAS') return 200*UF;
+  if(c==='CSGI') return 0;
   return sumInc(c,lastN(3))/3;
+}
+function projectedClientIncome(c,m){
+  let v=projMonthlyClient(c);
+  if(c==='AGUAS ANDINAS' && m==='2026-05') return 0;
+  if(c==='AGUAS ANDINAS' && m==='2026-06') return 600*UF;
+  if(c==='CSGI' && m>='2026-08' && m<='2027-03') v+=160000*DOLAR/8;
+  return v;
 }
 
 function contribution(ms){
@@ -74,8 +85,10 @@ function contribution(ms){
 }
 function futureMonths(){
   const last=DATA.months[DATA.months.length-1].split('-').map(Number);
+  const current=currentMonthKey().split('-').map(Number);
   const out=[];let y=last[0],mo=last[1];
-  while(!(y===2026&&mo>=12)){mo++;if(mo>12){mo=1;y++;}out.push(`${y}-${String(mo).padStart(2,'0')}`);if(y>2026)break;}
+  if(current[0]>y || (current[0]===y && current[1]>mo)){y=current[0];mo=current[1]-1;}
+  while(!(y===2027&&mo>=3)){mo++;if(mo>12){mo=1;y++;}out.push(`${y}-${String(mo).padStart(2,'0')}`);if(y>2027)break;}
   return out;
 }
 function splitOwners(rm){
@@ -83,9 +96,9 @@ function splitOwners(rm){
   if(SOCIOS_REALES.includes(rm)) return [{rm,w:1}];
   return [];
 }
-function projectedContributionBySocio(){
+function projectedContributionBySocio(m=currentMonthKey()){
   const l3=lastN(3);
-  const rows=clients().map(c=>({rm:DATA.rm[c]||'SIN RM',ing:projMonthlyClient(c),margen:projMonthlyClient(c)}));
+  const rows=clients().map(c=>({rm:clientRM(c),ing:projectedClientIncome(c,m),margen:projectedClientIncome(c,m)}));
   const totM=rows.reduce((a,r)=>a+r.margen,0);
   const exp=-(l3.reduce((a,m)=>a+officeM(m)+costAllM(m),0))/3;
   const factor=totM>0?exp/totM:0;
@@ -104,13 +117,13 @@ function allocatedSocioRows(ms){
   contribution(ms).forEach(row=>splitOwners(row.rm).forEach(o=>addAllocated(acc[o.rm],row,o.w)));
   return SOCIOS_REALES.map(rm=>acc[rm]);
 }
-function allocatedProjectionRows(){
+function allocatedProjectionRows(m=currentMonthKey()){
   const acc=Object.fromEntries(SOCIOS_REALES.map(rm=>[rm,blankSocio(rm)]));
-  projectedContributionBySocio().forEach(row=>splitOwners(row.rm).forEach(o=>addAllocated(acc[o.rm],row,o.w)));
+  projectedContributionBySocio(m).forEach(row=>splitOwners(row.rm).forEach(o=>addAllocated(acc[o.rm],row,o.w)));
   return SOCIOS_REALES.map(rm=>acc[rm]);
 }
 function contributionForMonth(m, rm){
-  const rows = DATA.months.includes(m) ? allocatedSocioRows([m]) : allocatedProjectionRows();
+  const rows = DATA.months.includes(m) ? allocatedSocioRows([m]) : allocatedProjectionRows(m);
   return (rows.find(r=>r.rm===rm)||blankSocio(rm)).total;
 }
 
@@ -186,9 +199,9 @@ function balanceTimelineForSocio(rm){
   const realBase=DATA.months.map(m=>({m,...(allocatedSocioRows([m]).find(z=>z.rm===rm)||blankSocio(rm))}));
   const real=monthlyBalanceRows(rm,realBase);
   const last=real.length?real[real.length-1]:{acum:0,lastRetiro:null,acc:null};
-  const proj=allocatedProjectionRows().find(x=>x.rm===rm)||blankSocio(rm);
   let acc=last.acc||{ing:0,contrib:0,fee:0,repartir:0,total:0,anticipos:0,saldo:last.acum||0};
   const fut=futureMonths().map(m=>{
+    const proj=allocatedProjectionRows(m).find(x=>x.rm===rm)||blankSocio(rm);
     const ant=anticipoMensual(rm,m);
     acc={ing:acc.ing+proj.ing,contrib:acc.contrib+proj.contrib,fee:acc.fee+proj.fee,repartir:acc.repartir+proj.repartir,total:acc.total+proj.total,anticipos:acc.anticipos+ant,saldo:acc.saldo+proj.total-ant};
     return{m,proj:true,...proj,retiro:0,anticipo:ant,acum:acc.saldo,acc:{...acc},lastRetiro:last.lastRetiro};
